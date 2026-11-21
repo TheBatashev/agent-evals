@@ -13,6 +13,7 @@
 9. Choosing thresholds
 10. Multilingual evaluation
 11. Fault injection and replay contract
+12. Turn-level grader controls
 
 ## 1. Architecture
 
@@ -378,7 +379,7 @@ unavailable
 
 The adapter must record an append-only operation ledger containing `operation_id`, idempotency key, canonical arguments hash, attempt, start/end time, commit marker, resulting state version, returned fixture, and injected fault. The agent must not see hidden fault configuration or grader fields.
 
-Prove exactly-once semantics with three independent assertions:
+For a case whose expected outcome is one committed mutation, check three observations:
 
 1. The final source-of-truth state contains one intended mutation.
 2. The operation ledger contains at most one committed operation for the idempotency key.
@@ -386,3 +387,23 @@ Prove exactly-once semantics with three independent assertions:
 
 Record/replay data must be sanitized, versioned, deterministic, and scoped to the case. Prefer semantic fixtures over raw production payloads. Detect API-schema drift separately so an obsolete recording does not look like an agent regression.
 
+Exercise the recovery path through the normal client. After the destination commits, drop the acknowledgment, observe the status shown to the user, then reconnect. Resolve the original operation under the authorized identity using a receipt lookup or supported same-key replay. The revision may already have advanced because the operation succeeded. Check the receipt belongs to that operation, matches the original arguments, and leads to one durable effect. Include a different operation on the same object as a control. Reusing a key with changed arguments or presenting another actor's receipt must never acknowledge the new request. When reconciliation is unavailable, assert that the visible outcome stays unknown and no fresh mutation is dispatched. A pre-dispatch failure needs its own expectation.
+
+## 12. Turn-level grader controls
+
+For each obligation, write down the turn when it falls due, the source of truth, the evidence the grader may read, and at least one acceptable outcome. For an answer grader, expose the delivered text or cards and earlier user-visible context plus the relevant reference facts. Give a state grader the destination record and operation identity. Inspect tool observations and drafts separately when diagnosing a failure. If the client delivery record is missing, mark delivery unverified. An observed empty reply is evidence of an omission.
+
+Use paired fixtures to check the scorer itself before comparing agents. For example, a scheduling assistant receives two available appointments. Accessibility is documented for one room and unknown for the other.
+
+| Change one condition | Expected grading behavior |
+|---|---|
+| Keep the facts and correct internal draft fixed. Suppress the confirmed accessible slot in the delivered answer to a request for that option. | The visible-answer criterion fails. Restoring the same fact in a delivered card on that turn can pass. |
+| Deliver the required detail only after the user asks again. | The first-turn omission still fails. The recovery turn can pass independently. |
+| Change “I prefer a step-free room” to “Only offer a room with confirmed step-free access.” | Allow qualified alternatives for the preference. Require evidence for each offered match under the strict constraint. For both cases an unsupported guarantee fails grounding, and a blanket refusal that hides the known match fails usefulness. |
+| Keep both available slots but change which room the tool confirms. | The answer must follow the updated observation. Multiple wordings and valid orders can pass. |
+
+Make the rubric independent of the agent's own intent labels. Confirm which criteria actually feed the verdict by introducing a known failure in each required dimension and observing the gate. For a semantic judge, keep independent human labels and representative disagreements. An uncalibrated score can guide investigation while semantic qualification remains open.
+
+When reviewing stored runs, retain immutable generations and link each new grade to its parent run, artifact digest, case/turn, and evaluator fingerprint (evidence selection, rubric, grader code, judge model/settings). Compare baseline and candidate with the same evaluator and compatible case facts. Missing delivered output cannot be reconstructed from a draft. Report new grading calls/cost separately from the original generation calls/cost. A changed runtime needs its own generation evidence for a current-build behavior claim.
+
+Method references checked 2026-11-22. Anthropic distinguishes observed outcomes from traces. The pinned τ²-bench guide shows how a task selects environment and communication checks for its reward. The fixtures above apply those distinctions to turn-specific product obligations. [Anthropic agent evaluations](https://www.anthropic.com/research/demystifying-evals-for-ai-agents) · [τ²-bench evaluation criteria](https://github.com/sierra-research/tau2-bench/blob/033bf082f48e4a3c6a1256208e93cf2ce9c3bb6f/docs/evaluation.md)

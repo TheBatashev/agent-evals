@@ -11,16 +11,16 @@ Build evidence that an AI system completes real tasks reliably, not merely that 
 
 For every non-trivial request:
 
-1. Inspect the real agent entrypoint, prompts, tool schemas, state stores, retrieval path, traces, tests, and deployment constraints before designing evals.
+1. Trace the affected behavior from the entrypoint to the evidence needed for the decision. If reviewing a supplied evidence packet, state which claims it supports and which require another observation.
 2. State a short implementation plan before modifying files.
 3. Define product success and unacceptable failure before choosing metrics or a vendor.
-4. Prefer executable outcome checks over trajectory checks, trajectory checks over final-text judges, and deterministic checks over LLM judges whenever the criterion is computable.
+4. Match evidence to the claim. Check durable effects in the destination system, user-facing quality in what was delivered on the relevant turn, and ordering in observable events when order is part of the contract. A task can require all three.
 5. Isolate external effects with a hermetic fixture, sandbox, record/replay layer, fake clock, seeded data, and idempotent cleanup. Never let offline evals mutate production.
 6. Version the system configuration, dataset, environment fixture, graders, judge model/prompt, and run results together.
 7. Run repeated trials for nondeterministic behavior and report uncertainty, not only a mean score.
 8. Convert every confirmed production failure into a regression case after redaction and root-cause classification.
 9. Calibrate model graders against human-labeled examples and revalidate them when the judge, rubric, domain, or output distribution changes.
-10. Deliver runnable artifacts: cases, graders, runner, CI gate, trace schema, and a result report. Do not stop at an eval strategy document when implementation is requested.
+10. Match the work to the decision. For an incident, start with one reproducible failure and a contrasting valid case. For implementation, run the affected checks through the normal entrypoint. For a release, identify the required gates and evidence for the candidate build. Keep paid trials and external effects within the user's authorization.
 
 ## Start with the Outcome-first Eval Pyramid
 
@@ -82,7 +82,7 @@ Use stable case IDs and JSONL or typed fixtures. Each case must include input, i
 
 Dataset rules:
 
-- Start with 20-50 high-signal cases; grow from real failures rather than waiting for a huge corpus.
+- Group cases by failure mechanism. Preserve the redacted incident, vary wording and prior state independently, and include a neighbor where the opposite behavior is correct. Keep siblings together when splitting off a blind holdout.
 - Include positive, negative, boundary, ambiguous, multilingual, long-context, malformed, adversarial, timeout, retry, partial-failure, and recovery cases.
 - Balance trigger/non-trigger pairs: call versus do not call, retrieve versus answer directly, handoff versus stay, remember versus forget.
 - Keep development, regression, calibration, and blind holdout partitions separate.
@@ -92,6 +92,8 @@ Dataset rules:
 - Redact production data and retain provenance without secrets or unnecessary personal data.
 
 Run `python scripts/validate_eval_dataset.py <dataset.jsonl>` after authoring or changing a dataset.
+
+The bundled command checks structure. Also resolve expected IDs, facts and permitted alternatives against the fixture or corpus snapshot used for that run. An obsolete expectation invalidates the affected comparison. Preserve the old case and record the corrected version.
 
 ### 4. Choose graders by criterion
 
@@ -106,6 +108,8 @@ Use a grader Strategy per atomic criterion:
 Split broad ideas such as “helpfulness” into observable criteria. Prefer binary or pairwise decisions with explicit anchors over unanchored 1-10 scores. Return a structured label, reason code, evidence span, confidence, and grader version.
 
 Never use one opaque composite score as the only gate. Keep dimensions separate, then define explicit hard failures and weighted product metrics.
+
+For a conversational task, specify which facts the agent had and what the user needed by each turn. Check factual support, permission, and useful progress independently. Give the answer grader only the delivered messages/cards up to that turn and the minimum authoritative facts needed to grade them. Keep internal plans and later turns in the diagnostic trace. Test this evidence boundary with the [worked grader controls](references/eval-design.md#12-turn-level-grader-controls).
 
 ### 5. Calibrate LLM-as-judge
 
@@ -154,6 +158,8 @@ The answer must not receive a passing groundedness grade merely because retrieve
 
 Test tool selection, non-selection, argument schema, semantic argument correctness, authorization, ordering invariants, idempotency, retries, timeout handling, partial failure, malformed output, result interpretation, and final outcome. Test similar tool names and poisoned tool descriptions. Verify state after execution; a syntactically correct call is not task success.
 
+For reads inside a decision loop, vary only the tool observation while holding the request fixed. Check whether the next decision uses the returned facts and whether a failed lookup still permits useful partial progress within the remaining budget. For writes, test a lost acknowledgment after commit through every supported write path using the [fault and replay contract](references/eval-design.md#11-fault-injection-and-replay-contract).
+
 #### Multi-agent systems
 
 Always compare against a single-agent baseline with the same task and comparable budget. Evaluate router/handoff precision and recall, delegation quality, duplicated work, conflicting writes, circular handoffs, message loss, shared-state consistency, stop conditions, merge/synthesis quality, recovery when one agent fails, total tokens, wall time, and marginal quality per added cost. Grade team outcome first; use agent-level traces for attribution.
@@ -161,6 +167,8 @@ Always compare against a single-agent baseline with the same task and comparable
 #### Memory
 
 Test write selection, value accuracy, provenance, retrieval precision/recall, temporal updates, conflict resolution, cross-session persistence, cross-user/tenant isolation, deletion/forgetting, stale-memory rejection, irrelevant-memory non-use, compaction survival, and long-session state reconstruction. Use canary facts and deterministic state inspection; do not rely only on the agent claiming it remembered.
+
+Exercise the context boundary with a growing conversation and realistic tool payloads together. Carry a confirmed constraint and a declined suggestion across compaction, then change the task. Inspect which facts should survive, expire, or be superseded and check their effect on the next visible action. When users request alternatives, distinguish candidates retrieved, shown, and selected.
 
 ### 8. Automate gates and observability
 
@@ -249,18 +257,10 @@ Never install a framework merely to satisfy this matrix. Inspect the existing st
 
 ## Required deliverables
 
-When implementation is requested, finish with:
+For implementation, leave reproducible cases, the checks that decide them, the invocation, and the observed results. Reuse the project's harness. Add a model judge, CI gate or live comparison when the decision calls for it. A design or review request can finish with findings and evidence gaps.
 
-1. `evals/README.md` or equivalent short runbook only if the repository convention requires it;
-2. versioned case fixtures and dataset manifest;
-3. deterministic and model-based graders;
-4. a hermetic runner with repeated trials;
-5. local command and CI job;
-6. baseline and candidate result artifacts;
-7. slice-level report with regressions, uncertainty, cost, and latency;
-8. failure examples and follow-up owners;
-9. trace/observability fields;
-10. release verdict: pass, warn, or block, with exact reasons.
+For a release decision, map each required claim to its source/configuration fingerprint, run mode, cases × trials, result, and artifact. Separate fixture checks, fresh model generations, regrades of saved output, human review, browser/device runs and operator acceptance as applicable. Mark missing evidence as untested and show which decision it prevents. A green objective smoke alone leaves semantic quality unmeasured. See the [report template](references/templates.md#8-result-report).
+
+For a client pilot, define who accepts the result, the destination or rubric, and the eligible workload. Compare with the current workflow on comparable cases. Count accepted unique tasks over all eligible arrivals, including pre-run losses. Track handoffs, human corrections and retries separately. Divide total operating and review cost for that cohort by accepted tasks. With zero accepted tasks report spend and zero accepted; the unit cost is undefined.
 
 Use [references/templates.md](references/templates.md) for ready-to-fill templates, [references/eval-design.md](references/eval-design.md) for schemas and formulas, and [references/research-2025-2026.md](references/research-2025-2026.md) when current source rationale or tool comparison is needed.
-
